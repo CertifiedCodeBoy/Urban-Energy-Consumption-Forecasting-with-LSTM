@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  # -------------------------------------------------------------------------
+  # Training job — run once to produce models/lstm_v2.h5
+  # Usage:  docker compose run --rm trainer
+  # -------------------------------------------------------------------------
+  trainer:
+    build:
+      context: .
+      target: runtime
+    image: energy-forecasting:latest
+    container_name: energy_trainer
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - OWM_API_KEY=${OWM_API_KEY:-}
+    command: >
+      python train.py
+        --epochs 50
+        --lookback 48
+        --save_plots
+    profiles:
+      - train
+
+  # -------------------------------------------------------------------------
+  # Inference API — always-on REST endpoint
+  # Usage:  docker compose up api
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      target: runtime
+    image: energy-forecasting:latest
+    container_name: energy_api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+      - ./models:/app/models:ro
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - OWM_API_KEY=${OWM_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/health'')"',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    profiles:
+      - serve
+
+networks:
+  default:
+    name: energy_network
